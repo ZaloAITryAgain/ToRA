@@ -1,11 +1,13 @@
 set -ex
 
 # MODEL_NAME_OR_PATH="llm-agents/tora-code-34b-v1.0"
-MODEL_NAME_OR_PATH="llm-agents/tora-70b-v1.0"
+# MODEL_NAME_OR_PATH="llm-agents/tora-70b-v1.0"
+MODEL_NAME_OR_PATH='...cache/tora-70b-v1.0'
 
 # DATA_LIST = ['math', 'gsm8k', 'gsm-hard', 'svamp', 'tabmwp', 'asdiv', 'mawps']
 
-DATA="math"
+# DATA="math"
+DATA = 'zalo'
 # DATA="gsm8k"
 
 SPLIT="test"
@@ -16,7 +18,7 @@ NUM_TEST_SAMPLE=-1
 CUDA_VISIBLE_DEVICES=2,3 TOKENIZERS_PARALLELISM=false \
 python -m infer.inference \
 --model_name_or_path ${MODEL_NAME_OR_PATH} \
---data ${DATA} \
+--data_name ${DATA} \
 --split ${SPLIT} \
 --prompt_type ${PROMPT_TYPE} \
 --use_train_prompt_format \
