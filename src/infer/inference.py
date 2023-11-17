@@ -260,6 +260,7 @@ class LLM_Math_Solver:
 
             sample = {'idx': idx, 'question': example['question'], 'gt_cot': gt_cot, 'gt': gt_ans, 'prompt': full_prompt}
 
+
             # add remain fields
             for key in ['level', 'type', 'unit', 'solution_type', 'choices', 'solution', 'ques_type', 'ans_type']:
                 if key in example:
@@ -386,3 +387,4 @@ if __name__ == "__main__":
     print(result)
     with open('infer/result.json', 'w') as f:
         f.write(result)
+
