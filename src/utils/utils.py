@@ -15,8 +15,8 @@ def set_seed(seed: int = 42) -> None:
     print(f"Random seed set as {seed}")
 
 
-def load_jsonl(file: Union[str, Path]) -> Iterable[Any]:
-    with open(file, "r", encoding="utf-8") as f:
+def load_jsonl(file: Union[str, Path], _ascii:True) -> Iterable[Any]:
+    with open(file, "r", encoding="utf-8" if _ascii else None) as f:
         for line in f:
             try:
                 yield json.loads(line)
@@ -25,20 +25,23 @@ def load_jsonl(file: Union[str, Path]) -> Iterable[Any]:
                 exit()
 
 
-def save_jsonl(samples, save_path):
+def save_jsonl(samples, save_path, _ascii=True):
     # ensure path
     folder = os.path.dirname(save_path)
     os.makedirs(folder, exist_ok=True)
 
-    with open(save_path, "w", encoding="utf-8") as f:
+    with open(save_path, "w", encoding="utf-8" if _ascii else None) as f:
         for sample in samples:
-            f.write(json.dumps(sample) + "\n")
+            f.write(json.dumps(sample, ensure_ascii=_ascii) + "\n")
     print("Saved to", save_path)
 
 
 def load_prompt(data_name, prompt_type):
-    if data_name in ['gsm-hard', 'svamp', 'tabmwp', 'asdiv', 'mawps']:
+    # add data_name here to use the default prompt for gsm8k
+    if data_name in ['gsm-hard', 'svamp', 'tabmwp', 'asdiv', 'mawps', 'zalo']: 
         data_name = "gsm8k"
+        # data_name = "math"
+
     if prompt_type in ['platypus_fs', 'wizard_zs']:
         prompt_type = "cot"
     prompt_path = "./prompts/{}/{}.md".format(prompt_type, data_name)

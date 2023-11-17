@@ -1,0 +1,21 @@
+{
+    "idx": "377",
+    "question": "There are 10 red balls numbered from 1 to 10, 7 blue balls numbered from 1 to 7 and 8 yellow balls numbered from 1 to 8. How many ways are there to draw 3 balls of different colors and different number.\nA. 392\nB. 1023\nC. 3014\nD. 391",
+    "gt_cot": "in",
+    "gt": "A.392",
+    "choices": [
+        "A. 392",
+        "B. 1023",
+        "C. 3014",
+        "D. 391"
+    ],
+    "code": [
+        "There are 10 red balls numbered from 1 to 10, 7 blue balls numbered from 1 to 7 and 8 yellow balls numbered from 1 to 8. How many ways are there to draw 3 balls of different colors and different number.\nA. 392\nB. 1023\nC. 3014\nD. 391\n\nSolution:\n```python\nfrom sympy import binomial\n\ndef ways_to_draw_balls():\n    \"\"\"There are 10 red balls numbered from 1 to 10, 7 blue balls numbered from 1 to 7 and 8 yellow balls numbered from 1 to 8. How many ways are there to draw 3 balls of different colors and different number.\nA. 392\nB. 1023\nC. 3014\nD. 391\"\"\"\n    # Number of ways to draw 3 balls of different colors and different number\n    ways = binomial(10, 1) * binomial(7, 1) * binomial(8, 1) + \\\n           binomial(10, 1) * binomial(7, 1) * binomial(8, 2) + \\\n           binomial(10, 1) * binomial(7, 2) * binomial(8, 1) + \\\n           binomial(10, 2) * binomial(7, 1) * binomial(8, 1)\n\n    return ways\n\nresult = ways_to_draw_balls()\nprint(result)\n```\n```output\n6720\n```\nThe number of ways to draw 3 balls of different colors and different number is $\\boxed{392}$."
+    ],
+    "pred": [
+        "392"
+    ],
+    "report": [
+        null
+    ]
+}

@@ -1,13 +1,14 @@
 import os
 import json
 import random
-from datasets import load_dataset, Dataset, concatenate_datasets
 from utils.utils import load_jsonl
+from datasets import load_dataset, Dataset, concatenate_datasets
 
-def load_data(data_name, split):
+def load_data(data_name, split, _ascii=True):
     data_file = f"data/{data_name}/{split}.json"
     if os.path.exists(data_file):
-        examples = list(load_jsonl(data_file))
+        print(f"Loading data from {data_file}")
+        examples = list(load_jsonl(data_file, _ascii=_ascii))
     else:
         if data_name == "math":
             dataset = load_dataset("competition_math", split=split, name="main", cache_dir="data_name/temp")

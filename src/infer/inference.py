@@ -2,6 +2,7 @@
 This file is based on: https://github.com/microsoft/ProphetNet/tree/master/CRITIC
 """
 import random
+import json
 import os
 import argparse
 import time
@@ -18,8 +19,8 @@ from utils.python_executor import PythonExecutor
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_name", default="gsm8k", type=str)
     parser.add_argument("--model_name_or_path", default="gpt-4", type=str)
+    parser.add_argument("--data_name", default="gsm8k", type=str)
     parser.add_argument("--prompt_type", default="pal", type=str)
     parser.add_argument("--split", default="test", type=str)
     parser.add_argument("--num_test_sample", default=-1, type=int) # -1 for full data
@@ -31,13 +32,15 @@ def parse_args():
     parser.add_argument("--top_p", default=0.95, type=float)
     parser.add_argument("--shuffle", action="store_true")
     parser.add_argument("--use_train_prompt_format", action="store_true")
+    parser.add_argument("--cache_dir", default=None, type=str)
+    parser.add_argument("--use_ascii", action="store_true")
     args = parser.parse_args()
     args.top_p = 1 if args.temperature == 0 else args.top_p # top_p must be 1 when using greedy sampling (vllm)
     return args
 
 
 def main(args):
-    examples = load_data(args.data_name, args.split)
+    examples = load_data(args.data_name, args.split, args.use_ascii)
 
     # sample `num_test_sample` from dataset
     if args.num_test_sample > 0:
@@ -89,8 +92,12 @@ def main(args):
     # load model
     if len(examples) > 0:
         available_gpus = os.environ['CUDA_VISIBLE_DEVICES'].split(',')
-        llm = LLM(model=args.model_name_or_path, tensor_parallel_size=len(available_gpus))
+        llm = LLM(model=args.model_name_or_path, tensor_parallel_size=len(available_gpus), download_dir=args.cache_dir)
     samples = []
+
+    """
+    In summary, this code snippet processes each example in the examples list, parses the question and answer, constructs a prompt, and creates a new dictionary (sample) with the relevant information. The sample dictionaries are then added to the samples list.
+    """
     for example in tqdm(examples, total=len(examples)):
         idx = example['idx']
 
@@ -215,7 +222,7 @@ def main(args):
 
     # add processed samples
     all_samples.extend(processed_samples)
-    save_jsonl(all_samples, out_file)
+    save_jsonl(all_samples, out_file, args.use_ascii)
 
     result_str = evaluate(samples=all_samples, data_name=args.data_name, prompt_type=args.prompt_type, execute=True)
     result_str += f"\nTime use: {time_use:.2f}s"
@@ -225,7 +232,157 @@ def main(args):
     with open(out_file.replace(".jsonl", f"_{args.prompt_type}.metrics"), "w") as f:
         f.write(result_str)
 
+
+class LLM_Math_Solver:
+    def __init__(self, args):
+        available_gpus = os.environ['CUDA_VISIBLE_DEVICES'].split(',')
+        self.llm = LLM(model=args.model_name_or_path, tensor_parallel_size=len(available_gpus), download_dir=args.cache_dir)
+        self.pyexec = PythonExecutor(get_answer_from_stdout=True)
+        self.max_func_call = 1 if args.prompt_type in ['cot', 'pal'] else 4
+
+        self.stop_tokens = ["</s>", "---", "```output"]
+        if args.prompt_type in ['cot']:
+            self.stop_tokens.append("\n\n")
+        elif args.prompt_type in ['wizard_zs', 'platypus_fs']:
+            self.stop_tokens.extend(["Instruction", "Response"])
+
+        self.args = args
+    
+    def infer(self, it, debug=True):
+        examples, samples = [it] if isinstance(it, dict) else it, []
+        for example in tqdm(examples, total=len(examples)):
+            idx = example['id']
+
+            # parse question and answer
+            example['question'] = parse_question(example, self.args.data_name)
+            gt_cot, gt_ans = parse_ground_truth(example, self.args.data_name)
+            full_prompt = construct_prompt(self.args, example)
+
+            sample = {'idx': idx, 'question': example['question'], 'gt_cot': gt_cot, 'gt': gt_ans, 'prompt': full_prompt}
+
+            # add remain fields
+            for key in ['level', 'type', 'unit', 'solution_type', 'choices', 'solution', 'ques_type', 'ans_type']:
+                if key in example:
+                    sample[key] = example[key]
+            samples.append(sample)  
+
+        if len(samples) > 0 and debug:
+            print("-" * 50)
+            print("sample:", samples[0]['prompt'])
+            print("-" * 50)
+
+        # repeat n times
+        remain_prompts = [sample['prompt'] for sample in samples for _ in range(self.args.n_sampling)]
+        remain_prompts = [(i, prompt) for i, prompt in enumerate(remain_prompts)]
+        end_prompts = []
+
+        # start inference
+        # measure time use
+        start_time = time.time()
+        for epoch in range(self.max_func_call):
+            print("=" * 50, "Epoch", epoch)
+            current_prompts = remain_prompts
+            if len(current_prompts) == 0:
+                break
+
+            # get all outputs
+            prompts = [item[1] for item in current_prompts]
+            outputs = self.llm.generate(prompts, SamplingParams(
+                            temperature=self.args.temperature,
+                            top_p=self.args.top_p,
+                            max_tokens=1024,
+                            n=1,
+                            stop=self.stop_tokens,
+            ))
+
+            outputs = sorted(outputs, key=lambda x: int(x.request_id)) # sort outputs by request_id
+            outputs = [output.outputs[0].text for output in outputs]
+            assert len(outputs) == len(current_prompts)
+
+            # process all outputs
+            remain_prompts = []
+            remain_codes = []
+            for (i, query), output in zip(current_prompts, outputs):
+                output = output.rstrip()
+                query += output
+                if self.args.prompt_type == "pal":
+                    remain_prompts.append((i, query))
+                    if "```python" in output:
+                        output = extract_program(output)
+                    remain_codes.append(output)
+                elif self.args.prompt_type == "cot":
+                    end_prompts.append((i, query))
+                elif ("boxed" not in output and output.endswith("```")):
+                    program = extract_program(output)
+                    remain_prompts.append((i, query))
+                    remain_codes.append(program)
+                else:
+                    end_prompts.append((i, query))
+
+            # execute the remain prompts
+            remain_results = self.pyexec.batch_apply(remain_codes)
+            for k, (i, query) in enumerate(remain_prompts):
+                pred, report = remain_results[k]
+                pred, report = str(pred).strip(), str(report).strip()
+                if len(pred) > 100:
+                    pred = pred[:50] + "..." + pred[-50:]
+                if len(report) > 100:
+                    report = report[:50] + "..." + report[-50:]
+                exec_result = pred if pred else report
+                if "pal" in self.args.prompt_type:
+                    exec_result = "\\boxed{" + exec_result + "}"
+                exec_result = f"\n```output\n{exec_result}\n```\n"
+                query += exec_result
+                # not end
+                if epoch == self.max_func_call - 1:
+                    query += "\nReach max function call limit."
+                remain_prompts[k] = (i, query)
+
+        # unsolved samples
+        print("Unsolved samples:", len(remain_prompts))
+        end_prompts.extend(remain_prompts)
+        # sort by idx
+        end_prompts = sorted(end_prompts, key=lambda x: x[0])
+        ans_split = "<|assistant|>" if self.args.use_train_prompt_format else "Question:"
+        codes = [prompt.split(ans_split)[-1].strip() for _, prompt in end_prompts]
+
+        # extract preds
+        results = [run_execute(self.pyexec, code, self.args.prompt_type) for code in codes]
+        time_use = time.time() - start_time
+
+        # put results back to examples
+        all_samples = []
+        for i, sample in enumerate(samples):
+            code = codes[i*self.args.n_sampling: (i+1)*self.args.n_sampling]
+            result = results[i*self.args.n_sampling: (i+1)*self.args.n_sampling]
+            preds = [item[0] for item in result]
+            reports = [item[1] for item in result]
+
+            sample.pop('prompt')
+            sample.update({'code': code, 'pred': preds, 'report': reports})
+            all_samples.append(sample)
+
+        return all_samples
+
 if __name__ == "__main__":
     args = parse_args()
     set_seed(args.seed)
-    main(args)
+    # main(args)
+    sample = {
+        "id": "377",
+        "question": "There are 10 red balls numbered from 1 to 10, 7 blue balls numbered from 1 to 7 and 8 yellow balls numbered from 1 to 8. How many ways are there to draw 3 balls of different colors and different number.",
+        "choices": [
+            "A. 392",
+            "B. 1023",
+            "C. 3014",
+            "D. 391"
+        ],
+        "label": 0,
+        "answer": "A. 392",
+        "explanation": "in"
+    }
+    results = LLM_Math_Solver(args).infer(sample)
+    result = json.dumps(results[0], indent=4, ensure_ascii=False)
+    print(result)
+    with open('infer/result.json', 'w') as f:
+        f.write(result)

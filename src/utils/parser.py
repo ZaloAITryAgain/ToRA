@@ -268,6 +268,8 @@ def parse_ground_truth(example: Dict[str, Any], data_name):
                 gt_ans = float(gt_ans)
     elif data_name == "bbh":
         gt_cot, gt_ans = None, example['target']
+    elif data_name == "zalo":
+        gt_cot, gt_ans = example['explanation'], example['answer']
     else:
         raise NotImplementedError(data_name)
     # post process
@@ -291,6 +293,8 @@ def parse_question(example, data_name):
         question += f'{example["table"]}\n{example["question"]}'
         if example['choices']:
             question += f' Please select from the following options: {example["choices"]}'
+    elif data_name == 'zalo':
+        question = example['question'] + '\n' + '\n'.join(example['choices'])
     else:
         for key in ['question', 'problem', 'Question', 'input']:
             if key in example:
